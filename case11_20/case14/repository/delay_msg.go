@@ -9,7 +9,7 @@ import (
 )
 
 type DelayMsgRepository interface {
-	Insert(ctx context.Context, msgs []domain.DelayMsg) error
+	Insert(ctx context.Context, msg domain.DelayMsg) error
 	// 批量更新成完成
 	Complete(ctx context.Context, ids []int64) error
 	FindDelayMsg(ctx context.Context) ([]domain.DelayMsg, error)
@@ -19,11 +19,12 @@ type DelayMsgRepo struct {
 	delayDao dao.DelayMsgDAO
 }
 
-func (d *DelayMsgRepo) Insert(ctx context.Context, msgs []domain.DelayMsg) error {
-	entityMsgs := slice.Map(msgs, func(idx int, src domain.DelayMsg) dao.DelayMsg {
-		return d.toEntity(src)
-	})
-	return d.delayDao.Insert(ctx,entityMsgs)
+func NewDelayMsgRepo(delayDao dao.DelayMsgDAO) DelayMsgRepository {
+	return &DelayMsgRepo{delayDao: delayDao}
+}
+
+func (d *DelayMsgRepo) Insert(ctx context.Context, msg domain.DelayMsg) error {
+	return d.delayDao.Insert(ctx,d.toEntity(msg))
 }
 
 func (d *DelayMsgRepo) Complete(ctx context.Context, ids []int64) error {

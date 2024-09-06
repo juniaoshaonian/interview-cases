@@ -2,12 +2,12 @@ package case13
 
 import (
 	"context"
-	"fmt"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/ecodeclub/ekit/syncx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"interview-cases/test"
 	"log"
 	"testing"
 	"time"
@@ -44,7 +44,7 @@ func (s *TestSuite) initProducerAndConsumer() {
 	consumeMap.Store(2, 10*time.Minute)
 
 	topicMap := syncx.Map[string, *kafka.Producer]{}
-	topicMap.Store(bizTopic, kafkaProducer)
+	topicMap.Store(BizTopic, kafkaProducer)
 	consumer0, err := NewDelayConsumer(s.addr, &topicMap, &consumeMap)
 	require.NoError(s.T(), err)
 	consumer1, err := NewDelayConsumer(s.addr, &topicMap, &consumeMap)
@@ -105,7 +105,7 @@ func (s *TestSuite) TestDelayConsume() {
 func (s *TestSuite) sendMsg(data string, intervalTime time.Duration) time.Time {
 	err := s.producer.Produce(context.Background(), DelayMsg{
 		Data:  data,
-		Topic: bizTopic,
+		Topic: BizTopic,
 	}, intervalTime)
 	require.NoError(s.T(), err)
 	return time.Now()
@@ -126,40 +126,18 @@ type WantDelayMsg struct {
 }
 
 func (s *TestSuite) initTopic() {
-	// 创建 AdminClient
-	adminClient, err := kafka.NewAdminClient(&kafka.ConfigMap{
-		"bootstrap.servers": s.addr,
-	})
-	require.NoError(s.T(), err)
-	defer adminClient.Close()
-	// 设置要创建的主题的配置信息
-	topic := delayTopic
 	numPartitions := 3
 	replicationFactor := 1
-	// 创建主题
-	results, err := adminClient.CreateTopics(
-		context.Background(),
-		[]kafka.TopicSpecification{
-			{
-				Topic:             topic,
-				NumPartitions:     numPartitions,
-				ReplicationFactor: replicationFactor,
-			},
-			{
-				Topic:             bizTopic,
-				NumPartitions:     1,
-				ReplicationFactor: replicationFactor,
-			},
+	test.InitTopic([]kafka.TopicSpecification{
+		{
+			Topic:             delayTopic,
+			NumPartitions:     numPartitions,
+			ReplicationFactor: replicationFactor,
 		},
-	)
-	require.NoError(s.T(), err)
-	// 处理创建主题的结果
-	for _, result := range results {
-		if result.Error.Code() != kafka.ErrNoError && result.Error.Code() != kafka.ErrTopicAlreadyExists {
-			fmt.Printf("创建topic失败 %s: %v\n", result.Topic, result.Error)
-
-		} else {
-			fmt.Printf("Topic %s 创建成功\n", result.Topic)
-		}
-	}
+		{
+			Topic:             BizTopic,
+			NumPartitions:     1,
+			ReplicationFactor: replicationFactor,
+		},
+	}...)
 }

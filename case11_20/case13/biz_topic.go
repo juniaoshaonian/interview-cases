@@ -4,7 +4,7 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
-const bizTopic =  "biz_topic"
+const BizTopic =  "biz_topic"
 
 type BizConsumer struct {
 	consumer *kafka.Consumer
@@ -20,7 +20,7 @@ func NewBizConsumer(addr string) (*BizConsumer,error) {
 	if err != nil {
 		return nil, err
 	}
-	err = consumer.SubscribeTopics([]string{bizTopic}, nil)
+	err = consumer.SubscribeTopics([]string{BizTopic}, nil)
 	if err != nil {
 		return nil, err
 	}

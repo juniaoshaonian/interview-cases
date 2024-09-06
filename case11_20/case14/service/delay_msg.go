@@ -7,7 +7,7 @@ import (
 )
 
 type DelayMsgSvc interface {
-	Insert(ctx context.Context, msgs []domain.DelayMsg) error
+	Insert(ctx context.Context, msg domain.DelayMsg) error
 	// 批量更新成完成
 	Complete(ctx context.Context, ids []int64) error
 	FindDelayMsg(ctx context.Context) ([]domain.DelayMsg, error)
@@ -15,11 +15,17 @@ type DelayMsgSvc interface {
 
 
 type delayMsgSvc struct {
-	repo repository.DelayMsgRepo
+	repo repository.DelayMsgRepository
 }
 
-func (d *delayMsgSvc) Insert(ctx context.Context, msgs []domain.DelayMsg) error {
-	return d.repo.Insert(ctx, msgs)
+func NewDelayMsgSvc(repo repository.DelayMsgRepository) DelayMsgSvc {
+	return &delayMsgSvc{
+		repo: repo,
+	}
+}
+
+func (d *delayMsgSvc) Insert(ctx context.Context, msg domain.DelayMsg) error {
+	return d.repo.Insert(ctx, msg)
 }
 
 func (d *delayMsgSvc) Complete(ctx context.Context, ids []int64) error {
