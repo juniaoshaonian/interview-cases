@@ -13,6 +13,6 @@ EXPLAIN select * from `orders` where uid = 123 and create_time > '2024-10-25 18:
 
 索引扫描的行记录占比大，走全表
 
-EXPLAIN select * from `orders` where uid = 123 and create_time > '2024-10-13 18:47:59';
+EXPLAIN select * from `orders` where uid = 123 and create_time > '2024-09-13 18:47:59';
 ![img_2.png](img_2.png)
 
