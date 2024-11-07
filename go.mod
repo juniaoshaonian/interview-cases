@@ -3,7 +3,6 @@ module interview-cases
 go 1.22.0
 
 require (
-	github.com/bwmarrin/snowflake v0.3.0
 	github.com/confluentinc/confluent-kafka-go v1.9.2
 	github.com/ecodeclub/ekit v0.0.9
 	github.com/gin-gonic/gin v1.10.0
@@ -11,6 +10,7 @@ require (
 	github.com/redis/go-redis/v9 v9.6.1
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/stretchr/testify v1.9.0
+	go.uber.org/mock v0.5.0
 	golang.org/x/sync v0.8.0
 	google.golang.org/grpc v1.46.0
 	google.golang.org/protobuf v1.34.1
