@@ -18,11 +18,11 @@ func (m *Mock) Qps(ctx context.Context) (int, error) {
 	if diff < 12 {
 		return 300, nil
 	}
-	if diff < 17 {
+	if diff < 19 {
 		return 600, nil
 	}
-	if diff < 22 {
+	if diff < 23 {
 		return 1200, nil
 	}
-	return 900, nil
+	return 800, nil
 }
