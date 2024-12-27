@@ -1,48 +1,111 @@
 package case27
 
-// WeightedRoundRobinLoadBalancer 实现了加权轮询算法
-type WeightedRoundRobinLoadBalancer struct {
-	weights        []int
-	currentWeights []int
-	lastIndex      int
+import (
+	"context"
+	"google.golang.org/grpc/balancer"
+	"google.golang.org/grpc/balancer/base"
+	"sync"
+)
+
+// 定义权重的上下限
+const (
+	RequestType = "requestType" //
+)
+
+type rwServiceNode struct {
+	mu             *sync.RWMutex
+	readWeight     int32
+	curReadWeight  int32
+	writeWeight    int32
+	curWriteWeight int32
+	conn           balancer.SubConn
 }
 
-func (lb *WeightedRoundRobinLoadBalancer) Select(nodes []*ServiceNode) (*ServiceNode, error) {
-	if len(nodes) == 0 {
-		return nil, ErrNoAvailableNodes
+type RWBalancer struct {
+	nodes []*rwServiceNode
+}
+
+
+func (r *RWBalancer) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
+	if len(r.nodes) == 0 {
+		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
 
-	// 初始化或重置权重
-	if len(lb.weights) != len(nodes) {
-		lb.weights = make([]int, len(nodes))
-		lb.currentWeights = make([]int, len(nodes))
-		for i, node := range nodes {
-			lb.weights[i] = node.Weight
+	var totalWeight int32
+	var selectedNode *rwServiceNode
+	ctx := info.Ctx
+
+	for _, node := range r.nodes {
+		node.mu.Lock()
+		if r.isWrite(ctx) {
+			// 写请求，使用写权重
+			totalWeight += node.writeWeight
+			node.curWriteWeight += node.writeWeight
+			if selectedNode == nil || selectedNode.curWriteWeight < node.curWriteWeight {
+				selectedNode = node
+			}
+		} else {
+			// 读请求，使用读权重
+			totalWeight += node.readWeight
+			node.curReadWeight += node.readWeight
+			if selectedNode == nil || selectedNode.curReadWeight < node.curReadWeight {
+				selectedNode = node
+			}
 		}
-		lb.lastIndex = -1
+		node.mu.Unlock()
 	}
 
-	totalWeight := 0
-	for i, weight := range lb.weights {
-		totalWeight += weight
-		lb.currentWeights[i] += weight
+	if selectedNode == nil {
+		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
 
-	if totalWeight == 0 {
-		return nil, ErrNoAvailableNodes
+	selectedNode.mu.Lock()
+	if r.isWrite(ctx) {
+		selectedNode.curWriteWeight -= totalWeight
+	} else {
+		selectedNode.curReadWeight -= totalWeight
 	}
+	selectedNode.mu.Unlock()
 
-	maxWeight := -1000000
-	maxWeightIndex := -1
-	for i, weight := range lb.currentWeights {
-		if weight > maxWeight {
-			maxWeight = weight
-			maxWeightIndex = i
-		}
+	return balancer.PickResult{
+		SubConn: selectedNode.conn,
+		Done: func(info balancer.DoneInfo) {
+			// 可以在这里实现请求完成后的逻辑，比如调整权重
+		},
+	}, nil
+}
+
+func (r *RWBalancer) isWrite(ctx context.Context) bool {
+	val := ctx.Value(RequestType)
+	if val == nil {
+		return false
 	}
+	vv, ok := val.(int)
+	if !ok {
+		return false
+	}
+	return vv == 1
+}
 
-	lb.currentWeights[maxWeightIndex] -= totalWeight
-	lb.lastIndex = maxWeightIndex
+type WeightBalancerBuilder struct {
+}
 
-	return nodes[maxWeightIndex], nil
+func (w *WeightBalancerBuilder) Build(info base.PickerBuildInfo) balancer.Picker {
+	nodes := make([]*rwServiceNode, 0, len(info.ReadySCs))
+	for sub, subInfo := range info.ReadySCs {
+		readWeight := subInfo.Address.Attributes.Value("read_weight").(int32)
+		writeWeight := subInfo.Address.Attributes.Value("write_weight").(int32)
+
+		nodes = append(nodes, &rwServiceNode{
+			mu: &sync.RWMutex{},
+			conn:           sub,
+			readWeight:     readWeight,
+			curReadWeight:  readWeight,
+			writeWeight:    writeWeight,
+			curWriteWeight: writeWeight,
+		})
+	}
+	return &RWBalancer{
+		nodes: nodes,
+	}
 }
