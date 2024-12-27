@@ -3,8 +3,8 @@
 ## 场景描述
 我们的场景是 100 积分兑换一瓶可乐。那么扣积分的时候，要执行的操作就是先查询用户的积分，看看够不够 100 分，而如果积分足够的话，则扣积分。
 
-## 复现表锁
-运行case30_test.go下的TestCase30函数。这个测试会去抢占表锁。类似如下sql
+## 复现间隙锁
+运行case30_test.go下的TestCase30函数。这个测试会有个间隙锁。类似如下sql
 ```shell
 -- 记得先开启事务
 -- 在这里拿到了  而后执行一大堆的业务操作
@@ -15,10 +15,11 @@ UPDATE users SET credit = 20 WHERE id = 20000;
 COMMIT;
 ```
 
-执行如下sql查看是否表锁，
+执行如下sql查看锁的情况
 
 ```sql
 SELECT * FROM performance_schema.data_locks;
+这里有两个锁，但实际生效的下面这个第一个表锁是意向锁，是为了不让表结构改变的锁。真正起作用的是下面的记录锁
 ```
 ![img.png](img.png)
 

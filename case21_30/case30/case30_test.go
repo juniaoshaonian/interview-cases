@@ -36,11 +36,11 @@ func (t *TestSuite) SetupSuite() {
 	t.prepareData()
 }
 
-func (t *TestSuite) TestTableLock() {
+func (t *TestSuite) TestNextKey2Lock() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	t.db.Transaction(func(tx *gorm.DB) error {
-		// select for update 查找一个不存在列会导致锁表
+		// select for update 查找一个不存在列会导致间隙锁阻塞其他插入操作
 		var us User
 		err := tx.WithContext(ctx).
 			Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -48,7 +48,6 @@ func (t *TestSuite) TestTableLock() {
 			Where("id = ?", 20000).First(&us).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				// 稍微把时间调长一点方便观察表锁现象
 				time.Sleep(30 * time.Second)
 				return nil
 			} else {
@@ -116,6 +115,7 @@ func (t *TestSuite) prepareData() {
 		}
 		users = append(users, u)
 	}
+
 	err = t.db.WithContext(context.Background()).Create(users).Error
 	require.NoError(t.T(), err)
 }

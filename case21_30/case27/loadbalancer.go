@@ -1,48 +1,128 @@
 package case27
 
-// WeightedRoundRobinLoadBalancer 实现了加权轮询算法
-type WeightedRoundRobinLoadBalancer struct {
-	weights        []int
-	currentWeights []int
-	lastIndex      int
+import (
+	"context"
+	"github.com/pkg/errors"
+	"google.golang.org/grpc/balancer"
+	"google.golang.org/grpc/balancer/base"
+	"io"
+	"sync"
+)
+
+// 定义权重的上下限
+const (
+	RequestType = "requestType" //
+)
+
+type rwServiceNode struct {
+	mutex                *sync.RWMutex
+	conn                 balancer.SubConn
+	readWeight           int32
+	curReadWeight        int32
+	efficientReadWeight  int32
+	writeWeight          int32
+	curWriteWeight       int32
+	efficientWriteWeight int32
 }
 
-func (lb *WeightedRoundRobinLoadBalancer) Select(nodes []*ServiceNode) (*ServiceNode, error) {
-	if len(nodes) == 0 {
-		return nil, ErrNoAvailableNodes
+type RWBalancer struct {
+	nodes []*rwServiceNode
+}
+
+func (r *RWBalancer) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
+	if len(r.nodes) == 0 {
+		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
 
-	// 初始化或重置权重
-	if len(lb.weights) != len(nodes) {
-		lb.weights = make([]int, len(nodes))
-		lb.currentWeights = make([]int, len(nodes))
-		for i, node := range nodes {
-			lb.weights[i] = node.Weight
+	var totalWeight int32
+	var selectedNode *rwServiceNode
+	ctx := info.Ctx
+	iswrite := r.isWrite(ctx)
+	for _, node := range r.nodes {
+		node.mutex.Lock()
+		if iswrite {
+			totalWeight += node.efficientWriteWeight
+			node.curWriteWeight += node.efficientWriteWeight
+			if selectedNode == nil || selectedNode.curWriteWeight < node.curWriteWeight {
+				selectedNode = node
+			}
+		} else {
+			totalWeight += node.efficientReadWeight
+			node.curReadWeight += node.efficientReadWeight
+			if selectedNode == nil || selectedNode.curReadWeight < node.curReadWeight {
+				selectedNode = node
+			}
 		}
-		lb.lastIndex = -1
+		node.mutex.Unlock()
 	}
 
-	totalWeight := 0
-	for i, weight := range lb.weights {
-		totalWeight += weight
-		lb.currentWeights[i] += weight
+	if selectedNode == nil {
+		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
 	}
 
-	if totalWeight == 0 {
-		return nil, ErrNoAvailableNodes
+	selectedNode.mutex.Lock()
+	if r.isWrite(ctx) {
+		selectedNode.curWriteWeight -= totalWeight
+	} else {
+		selectedNode.curReadWeight -= totalWeight
 	}
+	selectedNode.mutex.Unlock()
+	return balancer.PickResult{
+		SubConn: selectedNode.conn,
+		Done: func(info balancer.DoneInfo) {
+			selectedNode.mutex.Lock()
+			defer selectedNode.mutex.Unlock()
+			isDecrementError := info.Err != nil && (errors.Is(info.Err, context.DeadlineExceeded) || errors.Is(info.Err, io.EOF))
+			if r.isWrite(ctx) {
+				if isDecrementError && selectedNode.efficientWriteWeight > 0 {
+					selectedNode.efficientWriteWeight--
+				} else if info.Err == nil {
+					selectedNode.efficientWriteWeight++
+				}
+			} else {
+				if isDecrementError && selectedNode.efficientReadWeight > 0 {
+					selectedNode.efficientReadWeight--
+				} else if info.Err == nil {
+					selectedNode.efficientReadWeight++
+				}
+			}
+		},
+	}, nil
+}
 
-	maxWeight := -1000000
-	maxWeightIndex := -1
-	for i, weight := range lb.currentWeights {
-		if weight > maxWeight {
-			maxWeight = weight
-			maxWeightIndex = i
-		}
+func (r *RWBalancer) isWrite(ctx context.Context) bool {
+	val := ctx.Value(RequestType)
+	if val == nil {
+		return false
 	}
+	vv, ok := val.(int)
+	if !ok {
+		return false
+	}
+	return vv == 1
+}
 
-	lb.currentWeights[maxWeightIndex] -= totalWeight
-	lb.lastIndex = maxWeightIndex
+type WeightBalancerBuilder struct {
+}
 
-	return nodes[maxWeightIndex], nil
+func (w *WeightBalancerBuilder) Build(info base.PickerBuildInfo) balancer.Picker {
+	nodes := make([]*rwServiceNode, 0, len(info.ReadySCs))
+	for sub, subInfo := range info.ReadySCs {
+		readWeight := subInfo.Address.Attributes.Value("read_weight").(int32)
+		writeWeight := subInfo.Address.Attributes.Value("write_weight").(int32)
+
+		nodes = append(nodes, &rwServiceNode{
+			mutex:                &sync.RWMutex{},
+			conn:                 sub,
+			readWeight:           readWeight,
+			curReadWeight:        readWeight,
+			efficientReadWeight:  readWeight,
+			writeWeight:          writeWeight,
+			curWriteWeight:       writeWeight,
+			efficientWriteWeight: writeWeight,
+		})
+	}
+	return &RWBalancer{
+		nodes: nodes,
+	}
 }
